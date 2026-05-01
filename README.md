@@ -190,23 +190,6 @@ The console shows a summary per run: `📊 Credibilidad: 12 sources — 🟢 5 h
 > **Known limitation**: the scorer reduces the influence of low-quality sources but does not eliminate them entirely when they are the only sources available for a topic. Topics with high misinformation density (e.g. health conspiracy theories) may still surface biased content — the output should be reviewed critically. A plaussible solution is to incorporate an agent to the workflow in charge of scoring the sources.
 ---
 
-## How the two-phase interrupt works
-
-```python
-# Phase 1 — runs until interrupt() inside human_validation_node
-for event in graph.stream(initial_state, thread_config, stream_mode="values"):
-    pass   # graph pauses here
-
-# user types commands in the console
-
-# Phase 2 — resume, passing user input back into the graph
-for event in graph.stream(Command(resume=user_commands), thread_config, ...):
-    final_state = event
-```
-
-The `MemorySaver` checkpointer serializes the full graph state between phases. In a production app you'd replace it with `PostgresSaver` and drive Phase 2 from an HTTP endpoint.
-
----
 
 ## Providers & Models
 

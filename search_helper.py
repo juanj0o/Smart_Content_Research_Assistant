@@ -3,11 +3,11 @@ Shared Tavily search helpers.
 
 Both the investigator (multi-query broad sweep) and the human node (single
 quick lookup when the user adds a custom subtopic) need to call Tavily.
-This module centralises that so both go through the same code path and
-both fail the same way (gracefully).
 """
 
 from langchain_community.tools.tavily_search import TavilySearchResults
+
+from credibility_scorer import rank_and_filter
 
 
 def quick_search(query: str, max_results: int = 4) -> list[dict]:
@@ -20,9 +20,9 @@ def quick_search(query: str, max_results: int = 4) -> list[dict]:
     try:
         tool = TavilySearchResults(max_results=max_results)
         results = tool.invoke(query)
-        if isinstance(results, list):
-            return results
-        return []
+        if not isinstance(results, list):
+            return []
+        return rank_and_filter(results)
     except Exception as e:
         print(f"    ⚠️  Quick search failed for '{query}': {e}")
         return []

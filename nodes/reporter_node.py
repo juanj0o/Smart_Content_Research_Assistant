@@ -17,9 +17,9 @@ from llm_factory import get_llm
 SYSTEM_PROMPT = """You are the Reporter Agent. You take curated research
 content and write a polished, professional markdown research report.
 
-Each section will include a list of numbered sources for that subtopic.
-Weave inline citations into the prose using the format [N] wherever the
-claim comes from a source (e.g. "Recent breakthroughs have shown [1][3]...").
+Each section includes a "citation_numbers" list — the valid citation numbers
+for that section (e.g. [1, 3, 5]). Weave those numbers inline as [N] wherever
+the claim is supported (e.g. "Recent breakthroughs have shown [1][3]...").
 
 Follow this exact structure:
 
@@ -41,10 +41,12 @@ inline citations where appropriate>
 ## Conclusions
 <synthesized takeaways and forward-looking notes>
 
-IMPORTANT:
-- Do NOT write a References section — that will be appended automatically.
+CRITICAL RULES:
+- Do NOT reproduce URLs anywhere in your output. Citation numbers only.
+- Do NOT write a References section — it will be appended automatically.
+- Do NOT write numbered lists of sources at the end of sections.
 - Do NOT include a trailing metadata line.
-- Only use citation numbers that appear in the sources list you are given.
+- Only use numbers from the citation_numbers list you are given per section.
 - Output only the markdown, no code fences around the whole document."""
 
 
@@ -104,11 +106,16 @@ def _build_references_md(global_index: list[tuple[int, str, str]]) -> str:
 
 def _annotate_payload(curated: dict, per_section: dict[str, list[str]]) -> dict:
     """
-    Return a copy of curated where each section has a numbered source list
-    in the format the LLM prompt expects: ["[1] https://...", "[2] ..."]
-    This makes inline citation easier — the LLM can see "this fact → [2]".
+    Replace each section's "sources" list with a "citation_numbers" list
+    containing only the global citation integers (e.g. [1, 3, 5]).
+
+    WHY: Previously we passed ["[1] https://url", "[2] https://url"] to the
+    LLM. Despite instructions, the model would copy those URLs into the
+    section body, creating duplicate reference lists. Passing only numbers
+    removes the URL from the LLM's context entirely — it can cite [1] without
+    ever seeing the URL, so there's nothing to reproduce verbatim.
     """
-    # Build a global url→number map first
+    # Build global url → number map
     url_to_n: dict[str, int] = {}
     n = 1
     for section in curated.get("curated_sections", []):
@@ -121,12 +128,13 @@ def _annotate_payload(curated: dict, per_section: dict[str, list[str]]) -> dict:
     annotated_sections = []
     for section in curated.get("curated_sections", []):
         s = dict(section)
-        numbered = [
-            f"[{url_to_n[u.strip()]}] {u.strip()}"
-            for u in s.get("sources", [])
+        # Only expose citation numbers — never the raw URLs
+        s.pop("sources", None)
+        s["citation_numbers"] = [
+            url_to_n[u.strip()]
+            for u in section.get("sources", [])
             if u.strip() in url_to_n
         ]
-        s["sources"] = numbered
         annotated_sections.append(s)
 
     return {**curated, "curated_sections": annotated_sections}

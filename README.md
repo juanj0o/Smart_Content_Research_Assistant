@@ -1,6 +1,6 @@
 # Research Assistant — LangGraph Edition
 
-A console-based multi-agent research assistant built with **LangGraph** and **real web search** (Tavily). Designed to be pedagogically explicit: every LangGraph concept is visible in the code with inline comments.
+A console-based multi-agent research assistant built with **LangGraph**, **real web search** (Tavily), and a source credibility scorer. 
 
 ---
 
@@ -10,31 +10,36 @@ A console-based multi-agent research assistant built with **LangGraph** and **re
 User input (topic)
       │
       ▼
-┌─────────────────┐     3 concurrent     ┌──────────────┐
-│  Investigator   │──── Tavily searches ─▶│  Web Results │
-│  (fast model)   │◀────────────────────  └──────────────┘
-└────────┬────────┘
-         │ raw_findings (4–6 subtopics + real URLs)
-         ▼
-┌─────────────────┐
-│ Human Validation│  approve / reject / modify / add
-│  (interrupt)    │
-└────────┬────────┘
-         │ approved_subtopics
-         ▼
-┌─────────────────┐
-│    Curator      │  deep analysis, relevance scores, cross-links
-│  (smart model)  │
-└────────┬────────┘
-         │ curated_content (with sources preserved)
-         ▼
-┌─────────────────┐
-│    Reporter     │  polished markdown report + References section
-│ (premium model) │
-└────────┬────────┘
-         │
-         ▼
-  reports/{topic}_{timestamp}.md
+┌─────────────────────────────────────────────┐
+│  Investigator  (fast model)                 │
+│  ├─ 3 concurrent Tavily searches            │
+│  ├─ Source credibility scoring + ranking    │
+│  └─ LLM synthesis → 4-6 subtopics + URLs   │
+└────────────────────┬────────────────────────┘
+                     │ raw_findings
+                     ▼
+┌─────────────────────────────────────────────┐
+│  Human Validation  (interrupt)              │
+│  approve / reject / modify / add            │
+│  └─ add triggers a live Tavily search       │
+└────────────────────┬────────────────────────┘
+                     │ approved_subtopics
+                     ▼
+┌─────────────────────────────────────────────┐
+│  Curator  (smart model)                     │
+│  Deep analysis, relevance scores,           │
+│  cross-links, sources preserved             │
+└────────────────────┬────────────────────────┘
+                     │ curated_content
+                     ▼
+┌─────────────────────────────────────────────┐
+│  Reporter  (premium model)                  │
+│  Markdown report with inline citations [N]  │
+│  References section built in Python         │
+└────────────────────┬────────────────────────┘
+                     │
+                     ▼
+          reports/{topic}_{timestamp}.md
 ```
 
 ### Key LangGraph concepts used
@@ -47,7 +52,7 @@ User input (topic)
 | `interrupt()` | `nodes/human_node.py` | Pauses execution for human input |
 | `Command(update, goto)` | `nodes/human_node.py` | State update + dynamic routing in one |
 | `MemorySaver` | `graph_builder.py` | Checkpointer — persists state across interrupt |
-| `LCEL` pipe `\|` | Every node | `prompt \| llm` = RunnableSequence |
+| LCEL pipe `\|` | Every node | `prompt \| llm` = RunnableSequence |
 
 ---
 
@@ -55,23 +60,21 @@ User input (topic)
 
 ```
 research_assistant_langgraph/
-├── main.py                  # Entry point — drives the two-phase graph execution
-├── config.py                # Model tiers (fast / smart / premium) per provider
-├── graph_state.py           # ResearchState TypedDict — the core of LangGraph
-├── graph_builder.py         # StateGraph assembly: nodes, edges, checkpointer
-├── llm_factory.py           # Returns ChatOllama or ChatGroq based on .env
-├── cost_tracker.py          # Token usage helpers
-├── json_utils.py            # Robust JSON parser (handles truncation, fences, etc.)
-├── search_helper.py         # Shared Tavily helpers (used by human_node add command)
+├── main.py                   # Entry point — drives the two-phase graph execution
+├── config.py                 # Model tiers (fast / smart / premium) per provider
+├── graph_state.py            # ResearchState TypedDict — the core of LangGraph
+├── graph_builder.py          # StateGraph assembly: nodes, edges, checkpointer
+├── llm_factory.py            # Returns ChatOllama or ChatGroq based on .env
+├── cost_tracker.py           # Token usage helpers
+├── json_utils.py             # Robust JSON parser (handles truncation, fences, etc.)
+├── search_helper.py          # Tavily helpers shared by investigator and human node
+├── credibility_scorer.py     # Domain-based source quality scoring and ranking
 ├── nodes/
-│   ├── investigator_node.py # Web search + LLM synthesis (concurrent via ThreadPool)
-│   ├── curator_node.py      # Deep analysis + source preservation
-│   ├── reporter_node.py     # Markdown report + deterministic References section
-│   └── human_node.py        # interrupt() + Command — human-in-the-loop
-├── tests/
-│   ├── test_json_utils.py   # Parser edge cases
-│   └── test_human_node.py   # Command parsing (approve / reject / modify / add)
-├── reports/                 # Generated reports saved here (auto-created)
+│   ├── investigator_node.py  # Concurrent web search + credibility filter + LLM
+│   ├── curator_node.py       # Deep analysis + source preservation
+│   ├── reporter_node.py      # Markdown report + deterministic References section
+│   └── human_node.py         # interrupt() + Command — human-in-the-loop
+├── reports/                  # Generated reports saved here (auto-created)
 ├── requirements.txt
 └── .env.example
 ```
@@ -130,7 +133,7 @@ Enter a research topic: quantum computing
 
 [1/4] 🔍 Investigator Agent running...
     🌐 Iniciando búsquedas concurrentes para: quantum computing
-    ...
+    📊 Credibilidad: 12 sources — 🟢 5 high  🟡 6 medium  🔴 1 low
 [2/4] 👤 Human validation required
 
 ══════════════════════════════════════════════
@@ -141,8 +144,11 @@ Topic: quantum computing
 
 Subtopics found:
   [1] Quantum Hardware
-  [2] Error Correction
-  [3] Quantum Algorithms
+      Summary: ...
+      Key points: qubit stability, superconducting circuits, error rates
+
+  [2] Quantum Algorithms
+  [3] Error Correction
   [4] Real-world Applications
   [5] Quantum vs Classical
 
@@ -163,11 +169,25 @@ You can chain commands: "approve 1,3 | reject 2 | add 'Quantum cryptography'"
 ```
 
 The generated report includes:
-- Executive Summary, Introduction
+- Executive Summary and Introduction
 - One section per approved subtopic with inline citations `[1][2]`
 - Cross-cutting Insights and Conclusions
-- A `## References` section grouped by subtopic, built deterministically in Python
+- A `## References` section grouped by subtopic, built deterministically in Python (never by the LLM)
 
+---
+
+## Source Credibility Scoring
+
+The `credibility_scorer.py` module scores every Tavily result from `0.0` to `1.0` before passing them to the LLM:
+
+- **Positive signals**: `.gov` / `.edu` TLDs, known scientific journals (PMC, Nature, arXiv, IEEE), health organizations (WHO, CDC), trusted news outlets (Reuters, BBC)
+- **Negative signals**: commercial URL patterns (`/shop`, `/buy`), product-selling content phrases, clickbait titles
+- Results are **sorted by score descending** — high-quality sources appear first in the LLM prompt (primacy bias)
+- Results below `0.15` are filtered out; a minimum of 5 results is always kept
+
+The console shows a summary per run: `📊 Credibilidad: 12 sources — 🟢 5 high 🟡 6 medium 🔴 1 low`
+
+> **Known limitation**: the scorer reduces the influence of low-quality sources but does not eliminate them entirely when they are the only sources available for a topic. Topics with high misinformation density (e.g. health conspiracy theories) may still surface biased content — the output should be reviewed critically. A plaussible solution is to incorporate an agent to the workflow in charge of scoring the sources.
 ---
 
 ## How the two-phase interrupt works
@@ -185,14 +205,6 @@ for event in graph.stream(Command(resume=user_commands), thread_config, ...):
 ```
 
 The `MemorySaver` checkpointer serializes the full graph state between phases. In a production app you'd replace it with `PostgresSaver` and drive Phase 2 from an HTTP endpoint.
-
----
-
-## Running tests
-
-```bash
-python -m unittest discover -s tests -p "test_*.py"
-```
 
 ---
 

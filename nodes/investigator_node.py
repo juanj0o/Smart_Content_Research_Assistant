@@ -8,6 +8,7 @@ from langchain_core.prompts import ChatPromptTemplate
 
 from config import get_model
 from cost_tracker import make_cost_entry
+from credibility_scorer import credibility_summary, rank_and_filter
 from graph_state import ResearchState
 from json_utils import parse_json_robust
 from llm_factory import get_llm
@@ -77,12 +78,7 @@ def _fetch_tavily(query: str, tool: TavilySearchResults) -> dict:
 def _run_searches(topic: str) -> tuple[list[dict], list[dict]]:
     """
     Run 3 Tavily searches CONCURRENTLY using a thread pool.
-
-    We use threads (not asyncio) because the rest of the project — including
-    LangGraph's `graph.stream()` — runs in a synchronous context. Using
-    `async def` here would crash with "No synchronous function provided".
-    Threads give us the same I/O concurrency benefit without changing the
-    surrounding contract.
+    Thread pool might improve latency with a bigger number of queries or slower responses, but it's a good demo of concurrency either way.
     """
     current_year = datetime.now().year
     queries = [
@@ -98,7 +94,7 @@ def _run_searches(topic: str) -> tuple[list[dict], list[dict]]:
     with ThreadPoolExecutor(max_workers=3) as pool:
         raw_search_results = list(pool.map(lambda q: _fetch_tavily(q, tool), queries))
 
-    # Flatten + dedupe by URL so the LLM doesn't see the same snippet twice
+    # Flatten + dedupe by URL
     flat_snippets = [
         snippet
         for result in raw_search_results
@@ -112,7 +108,12 @@ def _run_searches(topic: str) -> tuple[list[dict], list[dict]]:
             seen.add(url)
             unique_snippets.append(s)
 
-    return raw_search_results, unique_snippets
+    # Score and rank by credibility — high-quality sources go first so the
+    # LLM weights them more heavily (primacy bias). Low-quality commercial
+    # or biased sources are filtered out when above the minimum floor.
+    ranked_snippets = rank_and_filter(unique_snippets)
+
+    return raw_search_results, ranked_snippets
 
 
 def _format_snippets(snippets: list[dict]) -> str:
@@ -142,6 +143,7 @@ def investigator_node(state: ResearchState) -> dict:
 
     print(f"    🌐 Iniciando búsquedas concurrentes para: {topic}")
     raw_search_results, snippets = _run_searches(topic)
+    print(f"    📊 Credibilidad: {credibility_summary(snippets)}")
 
     model = get_model("fast")
     llm   = get_llm(model, temperature=0)

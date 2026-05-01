@@ -1,7 +1,5 @@
 """Human-in-the-loop node — pauses the graph for human review.
-
-This is the most pedagogically important node in the project: it uses
-LangGraph's `interrupt()` primitive to PAUSE the graph mid-run, and
+Uses LangGraph's `interrupt()` primitive to PAUSE the graph mid-run, and
 returns a `Command` object that both updates state AND routes to the
 next node.
 """
@@ -18,7 +16,7 @@ SEP = "════════════════════════�
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# Console rendering (identical UX to the from-scratch version)
+# Console rendering 
 # ─────────────────────────────────────────────────────────────────────────
 
 def _render_findings(topic: str, findings: list[dict]) -> None:
@@ -53,7 +51,7 @@ def _print_commands() -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# Command parsing (ported from the from-scratch version)
+# Command parsing 
 # ─────────────────────────────────────────────────────────────────────────
 
 def _parse_ids(arg: str) -> tuple[list[int], list[str]]:
